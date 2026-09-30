@@ -1,4 +1,3 @@
-# versions
 function Get-LatestVersion {
     <#
     .SYNOPSIS
@@ -29,7 +28,7 @@ function Get-LatestVersion {
     }
 }
 
-function Select-CurrentVersion {
+function Select-CurrentVersion { # 'manifest.ps1'
     <#
     .SYNOPSIS
         Select current version of installed app, from 'current\manifest.json' or modified time of version directory
@@ -50,16 +49,19 @@ function Select-CurrentVersion {
         $Global
     )
     process {
-        $appPath = appdir $AppName $Global
-        if (Test-Path "$appPath\current" -PathType Container) {
-            $currentVersion = (installed_manifest $AppName 'current' $Global).version
+        $currentPath = "$(appdir $AppName $Global)\current"
+        if (!(get_config NO_JUNCTION)) {
+            $manifestPath = "$currentPath\scoop-manifest.json"
+            if (!(Test-Path $manifestPath)) { $manifestPath = "$currentPath\manifest.json" }
+            $currentVersion = (parse_json $manifestPath).version
             if ($currentVersion -eq 'nightly') {
-                $currentVersion = (Get-Item "$appPath\current").Target | Split-Path -Leaf
+                $currentVersion = (Get-Item $currentPath).Target | Split-Path -Leaf
             }
-        } else {
+        }
+        if ($null -eq $currentVersion) {
             $installedVersion = Get-InstalledVersion -AppName $AppName -Global:$Global
             if ($installedVersion) {
-                $currentVersion = $installedVersion[-1]
+                $currentVersion = @($installedVersion)[-1]
             } else {
                 $currentVersion = $null
             }
@@ -94,7 +96,8 @@ function Get-InstalledVersion {
     process {
         $appPath = appdir $AppName $Global
         if (Test-Path $appPath) {
-            $versions = @((Get-ChildItem "$appPath\*\install.json" | Sort-Object -Property LastWriteTimeUtc).Directory.Name)
+            $versions = @((Get-ChildItem "$appPath\*\scoop-install.json", "$appPath\*\install.json" -ErrorAction SilentlyContinue |
+                        Sort-Object -Property LastWriteTimeUtc).Directory.Name | Select-Object -Unique)
             return $versions | Where-Object { ($_ -ne 'current') -and ($_ -notlike '_*.old*') }
         } else {
             return @()
@@ -147,9 +150,20 @@ function Compare-Version {
         $splitReferenceVersion = @(SplitVersion -Version $ReferenceVersion -Delimiter $Delimiter)
         $splitDifferenceVersion = @(SplitVersion -Version $DifferenceVersion -Delimiter $Delimiter)
 
-        # Nightly versions are always equal
+        # Nightly versions are always equal unless UPDATE_NIGHTLY is $true
         if ($splitReferenceVersion[0] -eq 'nightly' -and $splitDifferenceVersion[0] -eq 'nightly') {
-            return 0
+            if (get_config UPDATE_NIGHTLY) {
+                # nightly versions will be compared by date if UPDATE_NIGHTLY is $true
+                if ($null -eq $splitReferenceVersion[1]) {
+                    $splitReferenceVersion += Get-Date -Format 'yyyyMMdd'
+                }
+                if ($null -eq $splitDifferenceVersion[1]) {
+                    $splitDifferenceVersion += Get-Date -Format 'yyyyMMdd'
+                }
+                return [Math]::Sign($splitDifferenceVersion[1] - $splitReferenceVersion[1])
+            } else {
+                return 0
+            }
         }
 
         for ($i = 0; $i -lt [Math]::Max($splitReferenceVersion.Length, $splitDifferenceVersion.Length); $i++) {

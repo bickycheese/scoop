@@ -23,13 +23,14 @@ param(
 . "$PSScriptRoot\..\lib\core.ps1"
 . "$PSScriptRoot\..\lib\manifest.ps1"
 . "$PSScriptRoot\..\lib\description.ps1"
+. "$PSScriptRoot\..\lib\download.ps1"
 
-$Dir = Resolve-Path $Dir
+$Dir = Convert-Path $Dir
 $Queue = @()
 
-Get-ChildItem $Dir "$App.json" | ForEach-Object {
-    $manifest = parse_json "$Dir\$($_.Name)"
-    $Queue += , @(($_.Name -replace '\.json$', ''), $manifest)
+Get-ChildItem $Dir -Filter "$App.json" -Recurse | ForEach-Object {
+    $manifest = parse_json $_.FullName
+    $Queue += , @($_.BaseName, $manifest)
 }
 
 $Queue | ForEach-Object {
@@ -44,7 +45,8 @@ $Queue | ForEach-Object {
     try {
         $wc = New-Object Net.Webclient
         $wc.Headers.Add('User-Agent', (Get-UserAgent))
-        $home_html = $wc.DownloadString($manifest.homepage)
+        $homepage = $wc.DownloadData($manifest.homepage)
+        $home_html = (Get-Encoding($wc)).GetString($homepage)
     } catch {
         Write-Host "`n$($_.Exception.Message)" -ForegroundColor Red
         return
